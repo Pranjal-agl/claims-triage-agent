@@ -1,0 +1,11 @@
+{
+  "fingerprint": "5c86a5f1c04ae19022079a6c402fc9dca32c3b0bf99537015723fc5be30870d5",
+  "n_cases": 25,
+  "slices": [
+    "auto",
+    "edge",
+    "fraud",
+    "health",
+    "property"
+  ]
+}
