@@ -4,7 +4,7 @@ A production-grade multi-step agentic AI pipeline that autonomously processes
 insurance claims - extracting structured data, querying a policy database,
 assessing fraud risk, and making approve/reject/escalate decisions.
 
-Built with **LangGraph** for agent orchestration and **Llama 3.1 70B** (Groq).
+Built with **LangGraph** for agent orchestration and **Llama 3.3 70B** (Groq).
 The engineering focus is on **proving** the system works: rigorous eval,
 ablation studies, calibration analysis, shadow deployment, and a full
 feedback loop from production back to offline metrics.
