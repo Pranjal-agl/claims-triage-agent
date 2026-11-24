@@ -56,11 +56,13 @@ try:
     from agents.llm import model_name as _model_name
     MODEL = _model_name()
 except Exception:  # pragma: no cover
-    MODEL = "llama-3.3-70b-versatile"
+    MODEL = "openai/gpt-oss-120b"
 
 FRAUD_BANDS = {"low": (0.0, 0.4), "medium": (0.4, 0.75), "high": (0.75, 1.01)}
 # Approximate paid-tier list prices (USD / 1M tokens) for cost awareness only.
-PRICES = {"llama-3.3-70b-versatile": (0.59, 0.79), "llama-3.1-8b-instant": (0.05, 0.08)}
+# USD per 1M tokens (input, output) for cost estimates. Set LLM_PRICE_IN / LLM_PRICE_OUT to your
+# provider's current list price; without them cost is reported as $0.
+PRICES = {}
 
 
 # ── helpers kept for backwards compatibility (ablations.py imports these) ───
@@ -126,6 +128,22 @@ def _rate_limit_wait(exc: Exception, attempt: int) -> float:
     return min(300, 15 * 2**attempt)
 
 
+def preflight() -> None:
+    """One tiny call before a run. Auth / model-not-found errors abort with a clear message."""
+    from agents.llm import make_chat_model, model_name, provider
+    try:
+        make_chat_model().invoke("Reply with the single word: ok")
+    except Exception as exc:  # noqa: BLE001
+        if _is_rate_limit(exc):
+            return  # transient — the per-case backoff handles it
+        msg = str(exc)
+        hint = ("model not available — set LLM_MODEL in .env to a model your provider serves "
+                "(Groq: openai/gpt-oss-120b or qwen/qwen3.6-27b)" if "model_not_found" in msg or "404" in msg
+                else "check GROQ_API_KEY / LLM_* settings in .env" if "401" in msg or "auth" in msg.lower()
+                else "see error above")
+        raise SystemExit(f"\n✗ LLM preflight failed for provider={provider()} model={model_name()}:\n  {msg[:300]}\n  → {hint}")
+
+
 def score_case(system: str, case: EvalCase, max_retries: int = 6) -> dict[str, Any]:
     from eval.systems import run_system
 
@@ -153,6 +171,10 @@ def score_case(system: str, case: EvalCase, max_retries: int = 6) -> dict[str, A
     else:
         err_internal = None
     att = attribute(case, dec, score, state.get("extracted") or {}, error=err)
+    if err_internal and not err:
+        # a node failed and @_safe_node substituted a fallback: the decision reflects an outage,
+        # not the system's judgement — count it as an error and re-run it on --resume
+        att = {**att, "failure_mode": "degraded", "evidence": str(err_internal)[:160]}
     ext = state.get("extracted") or {}
     return {
         "id": case.id, "slice": case.slice, "line": case.line, "tier": case.tier, "source": case.source,
@@ -196,7 +218,9 @@ def summarize(results: list[dict], system: str, dataset_fp: str, split: str) -> 
     inj = [r for r in results if "prompt_injection" in (r["truth"] or {}).get("flags", [])]
     tin = sum(r["token_usage"].get("tokens_in", 0) for r in results)
     tout = sum(r["token_usage"].get("tokens_out", 0) for r in results)
-    pin, pout = PRICES.get(MODEL, (0.59, 0.79))
+    import os
+    pin = float(os.getenv("LLM_PRICE_IN", PRICES.get(MODEL, (0, 0))[0]))
+    pout = float(os.getenv("LLM_PRICE_OUT", PRICES.get(MODEL, (0, 0))[1]))
     cost = tin * pin / 1e6 + tout * pout / 1e6
     strict = sum(r["decision_correct"] and r["band_correct"] for r in results)
 
@@ -223,7 +247,7 @@ def summarize(results: list[dict], system: str, dataset_fp: str, split: str) -> 
         "injection_resistance": {"not_approved": sum(r["actual_decision"] != "APPROVED" for r in inj),
                                  "total": len(inj)},
         "failure_breakdown": counts(results, "failure_mode"),
-        "errors": sum(1 for r in results if r["failure_mode"] == "api_error"),
+        "errors": sum(1 for r in results if r["failure_mode"] in ("api_error", "degraded")),
         "slice_metrics": grouped_accuracy(results, "slice"),
         "tier_metrics": grouped_accuracy(results, "tier"),
         "line_metrics": grouped_accuracy(results, "line"),
@@ -256,12 +280,14 @@ def run_eval(system: str, cases: list[EvalCase], out_dir: Path, split: str = "al
     if resume and partial.exists():
         for line in partial.read_text().splitlines():
             r = json.loads(line)
-            if r["failure_mode"] != "api_error":
+            if r["failure_mode"] not in ("api_error", "degraded"):
                 done[r["id"]] = r
     elif partial.exists():
         partial.unlink()
     if sleep_s is None:
         sleep_s = 1.0 if system in LLM_SYSTEMS else 0.0
+    if system in LLM_SYSTEMS:
+        preflight()
 
     if not quiet:
         print(f"\n{'─' * 64}\n  Eval  system={system}  cases={len(cases)}  "

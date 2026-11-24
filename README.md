@@ -2,7 +2,7 @@
 
 Two stages of one claims-operations system, each with its own measurement:
 
-1. **Triage agent** (LangGraph + Llama 3.3 70B). Reads a free-text claim, extracts fields,
+1. **Triage agent** (LangGraph + gpt-oss-120b on Groq). Reads a free-text claim, extracts fields,
    grounds them in the policy database, scores fraud, and decides APPROVE / REJECT / ESCALATE.
    It is measured on a 231-case rubric-labeled eval set against two baselines, with paired
    significance tests and stage-level root-cause analysis.
@@ -483,7 +483,7 @@ claims-triage-agent/
 | Layer | Technology |
 |---|---|
 | Agents | LangGraph (triage); plain tool-calling loop over the OpenAI-compatible API (assistant) |
-| LLM | Llama 3.3 70B via Groq; any OpenAI-compatible endpoint |
+| LLM | `openai/gpt-oss-120b` via Groq by default (`LLM_MODEL` to switch, e.g. `qwen/qwen3.6-27b`); any OpenAI-compatible endpoint |
 | Data | SQLite (triage policy lookup), Postgres 16 + pgvector (warehouse, documents, traces) |
 | Retrieval | Postgres full-text `ts_rank_cd` + pgvector HNSW, Reciprocal Rank Fusion |
 | Access control | Postgres login roles, row-level security, column privileges, document ACLs via RLS |

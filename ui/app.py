@@ -56,7 +56,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Insurance Claims Triage Agent")
-st.caption("Multi-step agentic pipeline · LangGraph + Llama 3.1 70B (Groq) · SQLite policy DB")
+st.caption("Multi-step agentic pipeline · LangGraph + LLM via Groq · SQLite policy DB")
 
 SAMPLES = {
     "Auto Accident — Normal": (

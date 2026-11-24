@@ -325,6 +325,15 @@ def main() -> None:
         agent, label = NullAgent(), "null"
     else:
         from assistant.agent import Agent
+        from assistant.llm import OpenAICompatClient
+        try:
+            OpenAICompatClient(cache_path="0").chat([{"role": "user", "content": "Reply with: ok"}], [])
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            if "429" not in msg and "rate" not in msg.lower():
+                hint = ("set ASSISTANT_LLM_MODEL or LLM_MODEL to a served model (Groq: openai/gpt-oss-120b)"
+                        if "model_not_found" in msg or "404" in msg else "check GROQ_API_KEY / LLM_* in .env")
+                raise SystemExit(f"✗ LLM preflight failed for model={config.LLM_MODEL}: {msg[:300]}\n  → {hint}")
         agent = Agent(retrieval_mode=args.retrieval, enable_docs=not args.no_docs)
         label = f"agent_{config.LLM_MODEL.replace('/', '_')}_{args.retrieval}" + ("_nodocs" if args.no_docs else "")
     label = args.label or label

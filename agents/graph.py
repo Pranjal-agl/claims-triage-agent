@@ -23,6 +23,8 @@ def route_after_fraud(state: ClaimState) -> str:
     - fraud_score >= 0.85 (clear fraud always auto-rejects)
     - Documentation signals appear in a negative context ("no FIR", "no receipts")
     """
+    if state.get("error"):
+        return "decide"   # degraded upstream: never auto-reject on fallback data; decide() escalates
     fraud = state.get("fraud") or {}
     score = fraud.get("fraud_score", 0.0)
 

@@ -62,3 +62,50 @@ def test_ablation_systems_run(fake_llm, tmp_path: Path):
     for system in ("agent_no_fraud", "agent_no_policy", "agent_simple_prompt"):
         m = run_eval(system, cases, tmp_path, sleep_s=0, quiet=True)
         assert m["total_cases"] == 4 and m["errors"] == 0
+
+
+def test_degraded_pipeline_escalates_never_rejects(monkeypatch):
+    """Regression: with the LLM down (e.g. retired model → 404), every claim used to be REJECTED
+    because the extraction fallback has no policy_id. It must ESCALATE to a human instead."""
+    import agents.nodes as nodes
+
+    class Down:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, *a, **k):
+            raise RuntimeError("Error code: 404 - model_not_found")
+    monkeypatch.setattr(nodes, "get_llm", lambda: Down())
+    st = _run("Policy POL-004, Sunita Patel. On 2024-11-10 a truck hit my car. FIR filed. Requesting Rs 65,000.")
+    assert st["error"] and st["decision"]["decision"] == "ESCALATED"
+
+
+def test_runner_marks_degraded_and_retries_on_resume(monkeypatch, tmp_path: Path):
+    import agents.nodes as nodes
+    from eval import runner
+
+    class Down:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, *a, **k):
+            raise RuntimeError("boom")
+    monkeypatch.setattr(nodes, "get_llm", lambda: Down())
+    monkeypatch.setattr(runner, "preflight", lambda: None)
+    m = runner.run_eval("agent", get_cases("v1")[:2], tmp_path, sleep_s=0, quiet=True)
+    assert m["errors"] == 2 and m["failure_breakdown"] == {"degraded": 2}
+    assert list(tmp_path.glob("agent_*.partial.jsonl"))   # kept, so --resume re-runs them
+
+
+def test_preflight_explains_retired_model(monkeypatch):
+    import pytest
+
+    import agents.llm as llm
+    from eval import runner
+
+    class Gone:
+        def invoke(self, *a, **k):
+            raise RuntimeError("Error code: 404 - {'error': {'code': 'model_not_found'}}")
+    monkeypatch.setattr(llm, "make_chat_model", lambda *a, **k: Gone())
+    with pytest.raises(SystemExit, match="LLM_MODEL"):
+        runner.preflight()

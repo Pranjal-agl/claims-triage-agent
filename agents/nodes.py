@@ -186,6 +186,13 @@ def decision_node(state: ClaimState) -> dict:
     not_yet_started = _check_before_start(extracted, policy) if not policy_not_found else False
     exceeds_coverage = claimed > coverage > 0
 
+    # Fail safe: if any upstream node degraded (API down, model missing, bad output),
+    # the inputs below are fallbacks, not facts. Escalate to a human instead of
+    # letting a fallback (e.g. empty policy_id → "not found") reject the claim.
+    if state.get("error"):
+        return {"decision": {**_SAFE_DECISION,
+                             "justification": f"{_SAFE_DECISION['justification']} ({state['error'][:160]})"}}
+
     # Hard-enforce thresholds deterministically — LLM only writes justification
     if policy_not_found:
         forced_decision = "REJECTED"

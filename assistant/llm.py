@@ -1,6 +1,6 @@
 """
 Chat client for any OpenAI-compatible endpoint with tool calling (default: Groq,
-llama-3.3-70b-versatile), with a SQLite response cache so eval runs are
+openai/gpt-oss-120b), with a SQLite response cache so eval runs are
 reproducible and resumable under free-tier rate limits.
 """
 
@@ -59,7 +59,9 @@ class OpenAICompatClient:
 
     def chat(self, messages: list[dict], tools: list[dict]) -> dict:
         """Returns {"content", "tool_calls": [{"id","name","arguments"}], "usage": {...}, "cached"}."""
-        req = {"model": self.model, "messages": messages, "tools": tools, "temperature": self.temperature}
+        req = {"model": self.model, "messages": messages, "temperature": self.temperature}
+        if tools:
+            req["tools"] = tools
         key = hashlib.sha256(json.dumps(req, sort_keys=True).encode()).hexdigest()
         hit = self._cache.get(key)
         if hit:
@@ -83,7 +85,7 @@ class OpenAICompatClient:
         conn_failures = 0
         for i in range(attempts):
             try:
-                return self._client.chat.completions.create(**req, tool_choice="auto")
+                return self._client.chat.completions.create(**req, **({"tool_choice": "auto"} if "tools" in req else {}))
             except openai.RateLimitError as e:
                 time.sleep(_retry_after(e) or min(120, 5 * 2**i))
             except openai.APIConnectionError:
@@ -91,7 +93,7 @@ class OpenAICompatClient:
                 if conn_failures > 2:
                     raise
                 time.sleep(2 * conn_failures)
-        return self._client.chat.completions.create(**req, tool_choice="auto")
+        return self._client.chat.completions.create(**req, **({"tool_choice": "auto"} if "tools" in req else {}))
 
 
 def _retry_after(e) -> float | None:

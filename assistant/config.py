@@ -31,7 +31,7 @@ ROLE_PASSWORDS = {
 # LLM: any OpenAI-compatible chat-completions endpoint with tool calling (default Groq).
 LLM_BASE_URL = os.getenv("ASSISTANT_LLM_BASE_URL", os.getenv("LLM_BASE_URL") or "https://api.groq.com/openai/v1")
 LLM_API_KEY = os.getenv("ASSISTANT_LLM_API_KEY") or os.getenv("LLM_API_KEY") or os.getenv("GROQ_API_KEY", "")
-LLM_MODEL = os.getenv("ASSISTANT_LLM_MODEL", os.getenv("LLM_MODEL", "llama-3.3-70b-versatile"))
+LLM_MODEL = os.getenv("ASSISTANT_LLM_MODEL", os.getenv("LLM_MODEL", "openai/gpt-oss-120b"))
 LLM_CACHE = os.getenv("LLM_CACHE", str(ROOT / ".cache" / "assistant_llm_cache.sqlite"))
 
 EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "local")

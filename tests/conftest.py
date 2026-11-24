@@ -21,6 +21,8 @@ def fake_llm(monkeypatch):
     monkeypatch.setattr(nodes, "get_llm", lambda: FakeLLM())
     monkeypatch.setattr(sp, "make_chat_model", lambda **kw: FakeLLM())
     monkeypatch.setattr(sp, "_llm", None)
+    import eval.runner as runner
+    monkeypatch.setattr(runner, "preflight", lambda: None)
     monkeypatch.setenv("LLM_CACHE", "0")
     yield
 
