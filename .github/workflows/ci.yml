@@ -1,0 +1,33 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: claims }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 3s --health-retries 20
+    env:
+      PGHOST: localhost
+      PG_SUPERUSER_PASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - run: python scripts/seed_db.py
+      # stage 1
+      - run: python -m eval.integrity                    # labels, leakage, generator repro, version pin
+      - run: python -m eval.runner --system rules        # deterministic baseline, no API key
+      # stage 2
+      - run: python -m warehouse.load                    # pinned dataset (sha256-checked), roles, RLS, docs
+      - run: python -m scripts.seed_triage_log           # stage 1 → stage 2 decision log
+      - run: python -m eval.assistant.rbac_suite         # fails the build on any leak
+      - run: python -m eval.assistant.retrieval_eval
+      - run: python -m eval.assistant.harness --validate
+      - run: python -m eval.assistant.harness --agent oracle
+      # everything, incl. offline end-to-end with fake / scripted LLMs and the warehouse tests
+      - run: python -m pytest -q

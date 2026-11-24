@@ -1,6 +1,5 @@
-import os
 from datetime import date as _date
-from langchain_groq import ChatGroq
+from .llm import make_chat_model
 from .state import ClaimState, ExtractedClaim, FraudAssessment, ClaimDecision
 from .tools import lookup_policy
 
@@ -54,11 +53,7 @@ def _safe_node(fn):
 def get_llm():
     global _llm
     if _llm is None:
-        _llm = ChatGroq(
-            model="llama-3.3-70b-versatile",
-            temperature=0,
-            max_retries=3,
-        )
+        _llm = make_chat_model(temperature=0)
     return _llm
 
 
@@ -122,6 +117,10 @@ def fraud_node(state: ClaimState) -> dict:
         f"not just because the amount is large.\n\n"
         f"Be decisive. Do not default to 0.5 or 0.8 without clear reason."
     )
+    guidance = state.get("guidelines") or []
+    if guidance:  # agent_rag variant: company guidance retrieved from the claims warehouse
+        context += "\n\nCOMPANY GUIDANCE (retrieved; apply it, but it does not override the rules above):\n" + \
+            "\n".join(f"[{g['chunk_id']}] {g['text']}" for g in guidance)
     result = llm.invoke(context)
     return {"fraud": result.model_dump()}
 
@@ -141,22 +140,29 @@ def auto_reject_node(state: ClaimState) -> dict:
     }
 
 
+def _parse_date(s) -> "_date | None":
+    try:
+        if s and len(str(s)) >= 10:
+            return _date.fromisoformat(str(s)[:10])
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
 def _check_policy_expired(extracted: dict, policy: dict) -> bool:
     """
     Compare incident_date against policy end_date in Python.
     More reliable than asking the LLM to compare date strings.
     Returns True if the incident occurred after the policy expired.
     """
-    try:
-        incident_str = extracted.get("incident_date", "")
-        end_str = policy.get("end_date", "")
-        if incident_str and end_str and len(incident_str) >= 10 and len(end_str) >= 10:
-            incident_dt = _date.fromisoformat(incident_str[:10])
-            end_dt = _date.fromisoformat(end_str[:10])
-            return incident_dt > end_dt
-    except (ValueError, TypeError):
-        pass
-    return False
+    inc, end = _parse_date(extracted.get("incident_date")), _parse_date(policy.get("end_date"))
+    return bool(inc and end and inc > end)
+
+
+def _check_before_start(extracted: dict, policy: dict) -> bool:
+    """True if the incident happened before the policy's start_date (not yet in force)."""
+    inc, start = _parse_date(extracted.get("incident_date")), _parse_date(policy.get("start_date"))
+    return bool(inc and start and inc < start)
 
 
 @_safe_node
@@ -175,13 +181,21 @@ def decision_node(state: ClaimState) -> dict:
 
     # Deterministic checks in Python — don't leave these to LLM interpretation
     policy_not_found = not policy.get("found", False)
+    policy_inactive = (not policy_not_found) and str(policy.get("status", "active")).lower() != "active"
     policy_expired = _check_policy_expired(extracted, policy) if not policy_not_found else False
+    not_yet_started = _check_before_start(extracted, policy) if not policy_not_found else False
     exceeds_coverage = claimed > coverage > 0
 
     # Hard-enforce thresholds deterministically — LLM only writes justification
     if policy_not_found:
         forced_decision = "REJECTED"
-        forced_reason = f"Policy not found in database."
+        forced_reason = "Policy not found in database."
+    elif policy_inactive:
+        forced_decision = "REJECTED"
+        forced_reason = f"Policy status is '{policy.get('status')}', not active."
+    elif not_yet_started:
+        forced_decision = "REJECTED"
+        forced_reason = f"Incident date precedes policy start ({extracted.get('incident_date','?')} < {policy.get('start_date','?')})."
     elif policy_expired:
         forced_decision = "REJECTED"
         forced_reason = f"Policy expired before incident date ({extracted.get('incident_date','?')} > {policy.get('end_date','?')})."

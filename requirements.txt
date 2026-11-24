@@ -1,9 +1,20 @@
+# stage 1 — triage agent
 langgraph>=0.2.0
 langchain-groq>=0.2.0
 langchain-core>=0.3.0
+langchain-openai>=0.2.0        # optional: any OpenAI-compatible provider
 pydantic>=2.0.0
 fastapi>=0.115.0
 uvicorn>=0.30.0
 streamlit>=1.38.0
 python-dotenv>=1.0.0
 requests>=2.32.0
+# stage 2 — claims analytics assistant
+openai>=1.40
+psycopg[binary]>=3.2
+sqlglot>=25.0
+pyyaml>=6.0
+pandas>=2.0
+# dev
+pytest>=8.0
+httpx>=0.27

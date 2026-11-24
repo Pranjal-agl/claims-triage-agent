@@ -189,6 +189,11 @@ with col_right:
 
             # Log to production monitor (for drift tracking)
             _logger.log_decision(claim_text, accumulated, node_latencies)
+            # stage 2 bridge: decision → triage.decisions (best effort; no-op without the warehouse)
+            from agents.decision_log import log_decision
+            from agents.llm import model_name
+            log_decision(accumulated, claim_text, source="ui", system="agent", model=model_name(),
+                         latency_ms=int(1000 * sum(node_latencies.values())))
 
             # Surface any node-level error gracefully
             if accumulated.get("error"):

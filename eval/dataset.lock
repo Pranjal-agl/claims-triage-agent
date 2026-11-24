@@ -1,11 +1,24 @@
 {
-  "fingerprint": "9f6baefefdcf5fd67489476b4f40e8814c7a3481b9dac6d06abd40c12bd32abf",
-  "n_cases": 25,
+  "fingerprint": "baee4840f34e45528d143b0693f313902b6af5a48bdb23bcad5b752aefb91864",
+  "n_cases": 231,
   "slices": [
     "auto",
+    "boundary",
+    "clean_approve",
+    "distractor_legit",
     "edge",
+    "exceeds_coverage",
+    "expired",
     "fraud",
+    "fraud_story",
     "health",
-    "property"
+    "high_ratio_documented",
+    "implausible_amount",
+    "inactive_policy",
+    "injection",
+    "pre_inception",
+    "property",
+    "review_needed",
+    "unknown_policy"
   ]
 }
