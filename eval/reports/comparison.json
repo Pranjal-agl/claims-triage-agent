@@ -1,0 +1,15 @@
+{
+  "n": 231,
+  "systems": {
+    "rules": {
+      "accuracy_pct": 78.4,
+      "ci95": [
+        72.6,
+        83.2
+      ],
+      "macro_f1": 0.778,
+      "fraud_auc": 0.7634
+    }
+  },
+  "paired_vs_reference": {}
+}

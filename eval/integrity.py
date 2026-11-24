@@ -23,6 +23,15 @@ Dataset integrity checks — run before any eval to verify:
    and all expected_fraud_band values are in {low, medium, high}.
    Catches typos before they silently skew metrics.
 
+5. RUBRIC CONSISTENCY
+   Re-derive every label from the case's latent truth with eval/rubric.py and
+   assert it matches the stored label. Prevents labels drifting toward what a
+   model happens to output (this is how v1's auto_05 was caught).
+
+6. GENERATOR REPRODUCIBILITY
+   Regenerate eval/data/claims_v2.jsonl in memory from its seed and assert it is
+   byte-identical to the committed file.
+
 Usage:
     python -m eval.integrity          # check only — exits 1 if any check fails
     python -m eval.integrity --repin  # recompute and overwrite dataset.lock
@@ -34,15 +43,22 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Source files whose content must not contain eval case text
 _AGENT_SOURCE_FILES = [
     "agents/nodes.py",
     "agents/graph.py",
     "agents/state.py",
     "agents/tools.py",
+    "agents/llm.py",
+    "baselines/rules_only.py",
+    "baselines/single_prompt.py",
+    "agents/rag.py",
+    "warehouse/docs/siu_fraud_guide.md",   # retrieved into the fraud prompt by the agent_rag variant
 ]
 
-LOCK_FILE = Path("eval/dataset.lock")
+LOCK_FILE = Path(__file__).parent / "dataset.lock"
 VALID_DECISIONS = {"APPROVED", "REJECTED", "ESCALATED"}
 VALID_FRAUD_BANDS = {"low", "medium", "high"}
 
@@ -170,6 +186,36 @@ def check_version(cases, repin: bool = False) -> list[str]:
     return []
 
 
+def check_rubric(cases) -> list[str]:
+    from eval.rubric import decide, fraud_band
+    from scripts.policies import by_id
+    pols = by_id()
+    out = []
+    for c in cases:
+        t = c.truth
+        if not t:
+            out.append(f"NO TRUTH: case '{c.id}' has no latent truth record")
+            continue
+        p = pols.get(t["policy_id"])
+        ratio = t["claimed_amount"] / p["coverage_limit"] if p else None
+        band = fraud_band(t.get("flags", []), ratio)
+        dec, rule = decide(dict(p, found=True) if p else None, t["claimed_amount"], t.get("incident_date"), band)
+        if (dec, band) != (c.expected_decision, c.expected_fraud_band):
+            out.append(f"RUBRIC MISMATCH: '{c.id}' stored=({c.expected_decision},{c.expected_fraud_band}) "
+                       f"rubric=({dec},{band}) via {rule}")
+    return out
+
+
+def check_generator() -> list[str]:
+    from eval.generate_cases import OUT_PATH, generate
+    payload = "".join(json.dumps(c, ensure_ascii=False) + "\n" for c in generate())
+    if not OUT_PATH.exists():
+        return [f"MISSING: {OUT_PATH} — run python -m eval.generate_cases"]
+    if OUT_PATH.read_text(encoding="utf-8") != payload:
+        return ["GENERATOR DRIFT: claims_v2.jsonl differs from eval/generate_cases.py output"]
+    return []
+
+
 def run_all(repin: bool = False) -> bool:
     """
     Run all integrity checks. Returns True if all pass, False otherwise.
@@ -188,6 +234,8 @@ def run_all(repin: bool = False) -> bool:
         ("Label sanity",    check_labels(EVAL_DATASET)),
         ("Deduplication",   check_duplicates(EVAL_DATASET)),
         ("Contamination",   check_contamination(EVAL_DATASET, project_root)),
+        ("Rubric labels",   check_rubric(EVAL_DATASET)),
+        ("Generator repro", check_generator()),
         ("Version pin",     check_version(EVAL_DATASET, repin=repin)),
     ]
 

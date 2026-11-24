@@ -1,8 +1,14 @@
 venv/
+.venv/
 .env
-data/policies.db
 __pycache__/
 *.pyc
 .DS_Store
+.pytest_cache/
+.cache/
+# runtime data (policies.db, production/shadow logs) — note the leading slash,
+# so eval/data/ (the committed eval set) is NOT ignored
+/data/
+# raw run manifests are large; the rendered reports in eval/reports/ are committed
 eval/runs/
-data/
+.traces/

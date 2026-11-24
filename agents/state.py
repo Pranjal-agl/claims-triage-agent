@@ -51,3 +51,4 @@ class ClaimState(TypedDict):
     decision: Optional[dict]
     final_report: Optional[str]
     error: Optional[str]
+    guidelines: Optional[list]   # agent_rag variant only: retrieved company guidance chunks

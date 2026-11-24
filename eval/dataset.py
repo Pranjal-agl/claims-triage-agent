@@ -1,41 +1,43 @@
 """
 eval/dataset.py
 
-Held-out labeled dataset for the claims triage agent eval harness.
-25 claims across 5 slices:
-  - auto        (5 cases)
-  - health      (5 cases)
-  - property    (5 cases)
-  - fraud       (5 cases — high-confidence fraud, expected REJECTED)
-  - edge        (5 cases — boundary conditions: expired policy, unknown policy,
-                           amount exactly at limit, suspiciously round number,
-                           missing incident date)
+Labeled held-out eval set for the claims triage agent.
 
-Each case carries:
-  claim_text            : free-text input to the agent
-  expected_decision     : APPROVED | REJECTED | ESCALATED
-  expected_fraud_band   : "low" (<0.4) | "medium" (0.4–0.75) | "high" (>0.75)
-  slice                 : slice label for per-slice metrics
-  notes                 : why this case is interesting / what it probes
+v1  (25 cases, hand-written)  — the original set: auto / health / property /
+    fraud / edge, 5 each. Texts are unchanged. Three labels were corrected to
+    match the written rubric (see V1_RELABELS and docs/LABEL_AUDIT.md), and every
+    case now carries `truth` (the real policy ID, amount and date) so the error
+    analysis can attribute failures to a pipeline stage.
 
-Ground truth was set by a human (Knox) reading each claim against the seeded
-policy DB and the decision rules in agents/nodes.py:
-  - REJECT if policy not found or expired
+v2  (206 cases, generated)     — eval/data/claims_v2.jsonl, produced by
+    eval/generate_cases.py from latent facts and labeled by eval/rubric.py.
+    13 scenario slices × 3 phrasing tiers (canonical / paraphrase / noisy).
+
+Selectors:
+    get_cases("all")  → v1 + v2   (default for all reports; n=231)
+    get_cases("v1")   → the original 25
+    get_cases("v2")   → the generated 206
+
+Labels follow docs/RUBRIC.md (code: eval/rubric.py):
+  - REJECT if policy not found, not active, or incident outside its window
   - REJECT if claimed > coverage_limit
-  - ESCALATE if fraud 0.4–0.75 OR claimed > 80% of coverage
-  - APPROVE otherwise (after deductible)
-  - AUTO-REJECT (REJECTED) if fraud > 0.75
+  - REJECT if fraud band is high
+  - ESCALATE if fraud band is medium OR claimed > 80% of coverage
+  - APPROVE otherwise (payout = claimed − deductible)
 
 Do NOT add these cases to few-shot prompts or the system prompt — they are the
-test set. Keep training/eval separation clean.
+test set. eval/integrity.py checks for leakage into agents/ and baselines/.
 """
 
-from dataclasses import dataclass, field
-from typing import Literal
+import json
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Literal, Optional
 
 DecisionLabel = Literal["APPROVED", "REJECTED", "ESCALATED"]
 FraudBand = Literal["low", "medium", "high"]
-Slice = Literal["auto", "health", "property", "fraud", "edge"]
+
+V2_PATH = Path(__file__).parent / "data" / "claims_v2.jsonl"
 
 
 @dataclass
@@ -44,11 +46,15 @@ class EvalCase:
     claim_text: str
     expected_decision: DecisionLabel
     expected_fraud_band: FraudBand
-    slice: Slice
+    slice: str
     notes: str = ""
+    line: str = ""                 # auto | health | property
+    tier: str = "canonical"        # canonical | paraphrase | noisy
+    source: str = "v1_handwritten" # v1_handwritten | v2_generated
+    truth: dict = field(default_factory=dict)
 
 
-EVAL_DATASET: list[EvalCase] = [
+_V1_ORIGINAL: list[EvalCase] = [
     # ── AUTO (5) ────────────────────────────────────────────────────────────
     EvalCase(
         id="auto_01",
@@ -364,6 +370,99 @@ EVAL_DATASET: list[EvalCase] = [
               "High fraud — complete lack of detail. Auto-reject is correct.",
     ),
 ]
+
+
+# ── v1 latent facts (for stage-level error attribution) ─────────────────────
+# (policy_id, claimed_amount, incident_date, incident_type, flags)
+_V1_TRUTH = {
+    "auto_01":   ("POL-004",    65000, "2024-11-10", "accident", []),
+    "auto_02":   ("POL-007",   380000, "2025-01-20", "accident", []),
+    "auto_03":   ("POL-001",     8500, "2024-12-01", "accident", []),
+    "auto_04":   ("POL-007",   220000, "2025-02-14", "other",    []),
+    "auto_05":   ("POL-001",   490000, "2024-10-05", "theft",    []),
+    "health_01": ("POL-005",    42000, "2024-09-12", "medical",  []),
+    "health_02": ("POL-008",   475000, "2025-03-10", "medical",  []),
+    "health_03": ("POL-005",    95000, "2024-11-22", "medical",  []),
+    "health_04": ("POL-008",   600000, None,         "medical",  ["vague_condition"]),
+    "health_05": ("POL-005",   120000, "2024-06-01", "medical",  []),
+    "prop_01":   ("POL-006",   340000, "2024-08-20", "fire",     []),
+    "prop_02":   ("POL-003",  1800000, "2024-07-18", "property_damage", []),
+    "prop_03":   ("POL-006",    85000, "2024-12-03", "property_damage", []),
+    "prop_04":   ("POL-003", 19500000, "2025-01-15", "property_damage", []),
+    "prop_05":   ("POL-006",   210000, "2024-09-07", "theft",    []),
+    "fraud_01":  ("POL-001",  9500000, None,         "theft",    ["no_police_report"]),
+    "fraud_02":  ("POL-003", 20000000, None,         "fire",     ["name_mismatch", "docs_destroyed_max_claim"]),
+    "fraud_03":  ("POL-005",   750000, None,         "medical",  ["vague_condition", "refuses_docs", "limit_anchoring"]),
+    "fraud_04":  ("POL-001",   500000, "2024-10-10", "accident", ["contradiction"]),
+    "fraud_05":  ("POL-004",   300000, None,         "accident", ["multiple_undated", "limit_anchoring"]),
+    "edge_01":   ("POL-002",   120000, "2024-08-10", "medical",  []),
+    "edge_02":   ("POL-002",    80000, "2025-09-15", "medical",  []),
+    "edge_03":   ("POL-999",    50000, "2024-11-01", "accident", ["unknown_policy"]),
+    "edge_04":   ("POL-004",   240000, "2024-12-20", "accident", ["limit_anchoring"]),
+    "edge_05":   ("POL-001",   100000, None,         "other",    ["no_details"]),
+}
+
+# ── v1 label corrections (audit trail; see docs/LABEL_AUDIT.md) ──────────────
+# id → (new_decision, new_band, reason)
+V1_RELABELS = {
+    "auto_05": ("ESCALATED", "medium",
+                "Was REJECTED/high to match observed model output (the case notes said so). "
+                "Under the rubric a documented theft (same-day FIR) at 98% of limit is "
+                "ESCALATED with a medium band. The model's high score is a failure, not the label."),
+    "auto_02": ("ESCALATED", "medium",
+                "Band was 'low'; rubric (and the agent's own fraud prompt) say a documented claim "
+                ">80% of limit is medium. Decision unchanged."),
+    "health_02": ("ESCALATED", "medium",
+                  "Band was 'low'; same >80%-of-limit rule as auto_02. Decision unchanged."),
+}
+
+
+def _build_v1() -> list[EvalCase]:
+    out = []
+    for c in _V1_ORIGINAL:
+        pid, amt, d, itype, flags = _V1_TRUTH[c.id]
+        line = {"auto": "auto", "health": "health", "prop": "property"}.get(c.id.split("_")[0], "")
+        if not line:
+            line = {"POL-001": "auto", "POL-004": "auto", "POL-003": "property",
+                    "POL-005": "health", "POL-002": "health"}.get(pid, "auto")
+        truth = {"policy_id": pid, "claimed_amount": float(amt), "incident_date": d,
+                 "incident_type": itype, "flags": flags}
+        c = replace(c, line=line, truth=truth)
+        if c.id in V1_RELABELS:
+            dec, band, why = V1_RELABELS[c.id]
+            c = replace(c, expected_decision=dec, expected_fraud_band=band,
+                        notes=f"[RELABELED v2] {why} | original note: {c.notes}")
+        out.append(c)
+    return out
+
+
+def _load_v2() -> list[EvalCase]:
+    if not V2_PATH.exists():
+        return []
+    cases = []
+    for line in V2_PATH.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            d = json.loads(line)
+            cases.append(EvalCase(**d))
+    return cases
+
+
+V1_CASES: list[EvalCase] = _build_v1()
+V2_CASES: list[EvalCase] = _load_v2()
+EVAL_DATASET: list[EvalCase] = V1_CASES + V2_CASES
+
+
+def get_cases(split: str = "all", slice_: Optional[str] = None, tier: Optional[str] = None,
+              case_id: Optional[str] = None) -> list[EvalCase]:
+    pool = {"all": EVAL_DATASET, "v1": V1_CASES, "v2": V2_CASES}[split]
+    if case_id:
+        pool = [c for c in pool if c.id == case_id]
+    if slice_:
+        pool = [c for c in pool if c.slice == slice_]
+    if tier:
+        pool = [c for c in pool if c.tier == tier]
+    return pool
+
 
 # Sanity check — IDs must be unique
 assert len({c.id for c in EVAL_DATASET}) == len(EVAL_DATASET), "Duplicate eval IDs"
