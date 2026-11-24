@@ -42,7 +42,10 @@ class SQLiteLLMCache(BaseCache):
         if not row:
             return None
         try:
-            return loads(row[0])
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                return loads(row[0])
         except Exception:
             return None
 
