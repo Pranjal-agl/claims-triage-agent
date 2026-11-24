@@ -35,6 +35,7 @@ CAUSE_HELP = {
     "injection_followed": "embedded instruction in the claim flipped the outcome to APPROVED",
     "decision_logic": "inputs fine, but the final rule application was wrong",
     "api_error": "system crashed / no decision",
+    "degraded": "a node failed and a safe fallback was used (outage, not judgement)",
 }
 ORDER = list(CAUSE_HELP)
 

@@ -1,6 +1,6 @@
 # Claims analytics assistant — eval report: `null`
 
-Model `llama-3.3-70b-versatile` · 76 questions · run 2026-11-24T08:51:56Z
+Model `openai/gpt-oss-120b` · 76 questions · run 2026-11-24T09:49:31Z
 
 ## Headline
 

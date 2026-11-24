@@ -9,7 +9,8 @@ Environment variables
 LLM_PROVIDER   groq (default) | openai
                "openai" means any OpenAI-compatible endpoint: OpenAI, OpenRouter,
                Together, Fireworks, a local Ollama / vLLM server, etc.
-LLM_MODEL      default: llama-3.3-70b-versatile
+LLM_MODEL      default: openai/gpt-oss-120b  (Groq retired llama-3.3-70b-versatile on 2026-08-16;
+               qwen/qwen3.6-27b is the other recommended replacement)
 LLM_BASE_URL   only for provider=openai (e.g. http://localhost:11434/v1 for Ollama)
 LLM_API_KEY    only for provider=openai (GROQ_API_KEY is used for groq)
 LLM_CACHE      path to a SQLite response cache, or "0" to disable.
@@ -23,7 +24,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 _ROOT = Path(__file__).parent.parent
 _cache_installed = False
 
