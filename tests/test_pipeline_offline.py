@@ -109,3 +109,30 @@ def test_preflight_explains_retired_model(monkeypatch):
     monkeypatch.setattr(llm, "make_chat_model", lambda *a, **k: Gone())
     with pytest.raises(SystemExit, match="LLM_MODEL"):
         runner.preflight()
+
+
+def test_fraud_node_sees_verbatim_claim_text(fake_llm, monkeypatch):
+    """Regression: the fraud node used to see only the extractor's one-line description, so a
+    terse summary dropped 'FIR filed' / 'workshop quotes' and documented claims were scored as
+    undocumented fraud. It must receive the original claim text."""
+    import agents.nodes as nodes
+    from tests.fake_llm import FakeLLM, _Bound
+
+    class TerseExtractor(FakeLLM):
+        def with_structured_output(self, schema):
+            bound = super().with_structured_output(schema)
+            if schema.__name__ != "ExtractedClaim":
+                return bound
+            orig = bound.invoke
+
+            def invoke(prompt, config=None):
+                out = orig(prompt, config)
+                return out.model_copy(update={"description": "Truck sideswiped my car"})   # drops the FIR
+            bound.invoke = invoke
+            return bound
+    monkeypatch.setattr(nodes, "get_llm", lambda: TerseExtractor())
+    text = ("Policy POL-004, claimant Sunita Patel. On 2024-11-10 a truck sideswiped my car. "
+            "Two workshop quotes attached. FIR filed (copy attached). Requesting Rs 65,000.")
+    _run(text)
+    prompt = _Bound.last_prompts["FraudAssessment"]
+    assert "FIR filed (copy attached)" in prompt and "<claim>" in prompt
